@@ -5,9 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ac4c28c5-2484-499f-a81a-857099bff265" name="Changes" comment="init">
-      <change afterPath="$PROJECT_DIR$/batch/polling.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/service/alarm.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/service/loader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/conftest.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_polling.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/batch/polling.py" beforeDir="false" afterPath="$PROJECT_DIR$/batch/polling.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -60,6 +63,9 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "ASKED_ADD_EXTERNAL_FILES": "true",
+    "Python tests.Python tests for test_polling.test_get_coin_lists.executor": "Run",
+    "Python tests.Python tests for test_polling.test_percentage_alarm.executor": "Run",
+    "Python tests.Python tests for test_polling.test_set_params.executor": "Run",
     "Python.app.executor": "Run",
     "Python.polling.executor": "Run",
     "RunOnceActivity.OpenProjectViewOnStart": "true",
@@ -118,9 +124,57 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="Python tests for test_polling.test_get_coin_lists" type="tests" factoryName="Autodetect" temporary="true" nameIsGenerated="true">
+      <module name="rate_batch_module" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;test_polling.test_get_coin_lists&quot;" />
+      <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Python tests for test_polling.test_percentage_alarm" type="tests" factoryName="Autodetect" temporary="true" nameIsGenerated="true">
+      <module name="rate_batch_module" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;test_polling.test_percentage_alarm&quot;" />
+      <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+      <method v="2" />
+    </configuration>
+    <configuration name="Python tests for test_polling.test_set_params" type="tests" factoryName="Autodetect" temporary="true" nameIsGenerated="true">
+      <module name="rate_batch_module" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;test_polling.test_set_params&quot;" />
+      <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+      <method v="2" />
+    </configuration>
     <recent_temporary>
       <list>
         <item itemvalue="Python.polling" />
+        <item itemvalue="Python tests.Python tests for test_polling.test_percentage_alarm" />
+        <item itemvalue="Python tests.Python tests for test_polling.test_get_coin_lists" />
+        <item itemvalue="Python tests.Python tests for test_polling.test_set_params" />
         <item itemvalue="Python.test" />
       </list>
     </recent_temporary>
@@ -163,7 +217,7 @@
                   <entry key="branch">
                     <value>
                       <list>
-                        <option value="master" />
+                        <option value="main" />
                       </list>
                     </value>
                   </entry>

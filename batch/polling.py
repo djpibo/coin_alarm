@@ -1,7 +1,8 @@
 # What should I do ?
 # 1. Alarm : 1% increase
 # 2. Alarm : Record High
-
+import asyncio
+import json
 # memo
 # [] is dict, {} is list
 
@@ -12,24 +13,22 @@ import redis
 import requests
 
 from pymongo import MongoClient
-from win10toast import ToastNotifier
+from discord_webhook import DiscordWebhook, DiscordEmbed
 
-toaster = ToastNotifier()
 r = redis.Redis(host='localhost', port=6379, db=0)
 client = MongoClient(host='localhost', port=27017)
 db = client['test_database']
 collection = db['test_collection']
+ticker_result = db['ticker_result']
+api_failure = db['api_failure']
 rise_list = db['rise_list']
 down_list = db['down_list']
 
 headers = {"accept": "application/json"}
-params = {}
-markets = []
 coin_up_list = []
 coin_down_list = []
 record_highest_list = []
 record_lowest_list = []
-total = 0
 
 url_markets = "https://api.upbit.com/v1/market/all?isDetails=true"
 url_ticker = "https://api.upbit.com/v1/ticker"
@@ -38,85 +37,65 @@ url_candle = "https://api.upbit.com/v1/candles/minutes/1?market=KRW-BTC&count=1"
 url_trade = "https://api.upbit.com/v1/trades/ticks?market=KRW-BTC&count=1&daysAgo=7"
 
 
-def call_api():
-    params["markets"] = set_params("market:KRW*")
-    res_candle = requests.get(url_ticker, params=params, headers=headers)
-    if res_candle.status_code == 200:
-        data_candle = res_candle.json()
-        print(collection.insert_many(data_candle))
-        print(data_candle)
-        percentage_alarm("market:KRW*")
-    else:
-        print(res_candle.content)
+def upbit_tracker():
+    _response = requests.get(
+        url_ticker
+        , params={"markets": [value.decode('utf-8') for value in r.lrange("KRW_coins", 0, -1)]}
+        , headers=headers)
+    _json = _response.json()
+    print(f"mongoDB insert : "
+          f"{ticker_result.insert_many(_json) if _response.status_code == 200 else api_failure.insert_many(_json)}")
 
 
-def set_params(key: str) -> markets:
-    keys = r.keys(key)
-    if not keys:
-        get_coin_lists()
-        keys = r.keys(key)
-    if not markets:
-        for item in keys:
-            markets.append(r.get(item).decode('utf-8'))
-    return markets
-
-
-def percentage_alarm(key: str):
-    keys = r.keys(key)
-    for item in keys:
-        dynamic_market = r.get(item).decode("UTF-8")
-        # 쿼리 작성
-        query = {
-            "market": dynamic_market
-        }
-        # 가장 최근 trade_time을 찾기 위해 정렬
-        sort_order = [("timestamp", -1)]
-        result_prev = collection.find(query, sort=sort_order).skip(1).limit(1)[0]  # return Cursor to dict (first)
-        result_curr = collection.find_one(query, sort=sort_order)  # <class 'dict'>
-        save_record(dynamic_market, result_curr.get("trade_price"))
-        # explain_result = result_prev.explain()
-        # print(explain_result)  # This will provide details about how the query is executed, including index usage
-        gap = result_curr.get("change_rate") - result_prev.get("change_rate")
-        if gap > 0.01:
-            if result_curr.get("change") == "RISE":
-                save_gap_list(result_curr, gap, 1)
-                coin_up_list.append(dynamic_market)
-            else:
-                save_gap_list(result_curr, gap, 0)
-                coin_down_list.append(dynamic_market)
-
+def alarm():
     if coin_up_list:
-        print(coin_up_list)
-        toaster.show_toast(f"상승폭 1% 이상 알림", f"대상 코인 : {coin_up_list}", duration=10)
-    coin_up_list.clear()
+        print(f"상승폭 알람 : {coin_up_list}")
+        discord_alarm(f"상승폭 알람", f"대상 코인 : {coin_up_list}")
+        coin_up_list.clear()
 
     if coin_down_list:
-        print(coin_down_list)
-        toaster.show_toast(f"하락폭 1% 이상 알림", f"대상 코인 : {coin_down_list}", duration=10)
-    coin_down_list.clear()
+        print(f"하락폭 알람 : {coin_down_list}")
+        discord_alarm(f"하락폭 알람", f"대상 코인 : {coin_down_list}")
 
     if record_highest_list:
-        print(record_highest_list)
-        toaster.show_toast(f"최고치 갱신", f"대상 코인 : {record_highest_list}", duration=5)
-    record_highest_list.clear()
+        print(f"최고치 알람 : {record_highest_list}")
+        discord_alarm(f"최고치 알람", f"대상 코인 : {record_highest_list}")
 
     if record_lowest_list:
-        print(record_lowest_list)
-        toaster.show_toast(f"최저치 갱신", f"대상 코인 : {record_lowest_list}", duration=5)
-    record_lowest_list.clear()
+        print(f"최저치 알람 : {record_lowest_list}")
+        discord_alarm(f"최저치 알람", f"대상 코인 : {record_lowest_list}")
+
+
+def coin_perform():
+    total = 0
+    count = r.llen("KRW_coins")
+    for dynamic_market in [value.decode('utf-8') for value in r.lrange("KRW_coins", 0, -1)]:
+        _result = collection.find({"market": dynamic_market}).sort("timestamp", -1).limit(2)
+        gap = abs(_result[0].get("change_rate") - _result[1].get("change_rate"))
+        save_record(dynamic_market, _result[0].get("trade_price"))
+        total = _result[0].get("change_rate") * 100
+        if gap > 0.01:
+            if _result[0].get("change") == "RISE":
+                save_gap_list(_result[0], gap, 1)
+                coin_up_list.append(dynamic_market)
+            else:
+                save_gap_list(_result[0], gap, 0)
+                coin_down_list.append(dynamic_market)
+    discord_alarm(f"평균 변화율 알람", f"대상 코인 건수 : {count}, 평균 변화율 : {format(total / count, ',.4f')}%")
 
 
 def get_coin_lists():
     response = requests.get(url_markets, headers=headers)
     coin_lists = response.json()
-    for item in coin_lists:
-        market = item["market"]
-        r.set(f"market:{market}", market)
+    _data = filter(lambda x: x['market'].startswith('KRW'), coin_lists)
+    r.delete("KRW_coins")
+    r.lpush("KRW_coins", *[item['market'] for item in _data])
+    print(f"get_coin_list called. {r.lrange("KRW_coins", 0, -1)}")
 
 
 def save_gap_list(result_curr, gap, flag: int):
     data = {"market": result_curr.get("market"),
-            "gap": format(gap*100, ".2f"),
+            "gap": format(gap * 100, ".2f"),
             "trade_date": result_curr.get("trade_date"),
             "trade_time": result_curr.get("trade_time_kst"),
             "change": result_curr.get("change"),
@@ -128,39 +107,67 @@ def save_gap_list(result_curr, gap, flag: int):
 
 
 def save_record(coin_name: str, trade_price: float):
-    r.zadd(f"count:{coin_name}", {'count': 0}, True)  # only for create, dismiss update
-    coin_info = r.hgetall(f"{coin_name}")
-    if not coin_info:
-        coin_data = {
-            'highest': trade_price,
-            'lowest': trade_price,
-            'trade_date': datetime.now().strftime("%Y%m%d"),
-            'trade_time': datetime.now().strftime("%H%M%S"),
-        }
-        for field, value in coin_data.items():
-            r.hset(f"{coin_name}", field, str(value))
+    coin_count = r.hget(f"{coin_name}", 'count')
+    if not coin_count:
+        coin_count = 0
+        r.hset(f"{coin_name}", 'highest', str(trade_price))
+        r.hset(f"{coin_name}", 'lowest', str(trade_price))
+        r.hset(f"{coin_name}", 'curr_trade_date', datetime.now().strftime("%Y%m%d"))
+        r.hset(f"{coin_name}", 'curr_trade_time', datetime.now().strftime("%Y%m%d"))
+        r.hset(f"{coin_name}", 'prev_trade_date', '0')
+        r.hset(f"{coin_name}", 'prev_trade_time', '0')
+        r.hset(f"{coin_name}", 'count', '0')
 
-    if int(r.zscore(f"count:{coin_name}", 'count')) > 3:
-        if trade_price > float(r.hget(f"{coin_name}", 'highest')):
-            r.hset(f"{coin_name}", 'highest', str(trade_price))
+    highest_price = float(r.hget(f"{coin_name}", 'highest'))
+    lowest_price = float(r.hget(f"{coin_name}", 'lowest'))
+
+    if int(coin_count) > 5:
+        if trade_price > highest_price:
+            highest_price = trade_price
             record_highest_list.append(coin_name)
-        if trade_price < float(r.hget(f"{coin_name}", 'lowest')):
-            r.hset(f"{coin_name}", 'lowest', str(trade_price))
+        if trade_price < lowest_price:
+            lowest_price = trade_price
             record_lowest_list.append(coin_name)
-        r.hset(f"{coin_name}", 'trade_date', datetime.now().strftime("%Y%m%d"))
-        r.hset(f"{coin_name}", 'trade_time', datetime.now().strftime("%H%M%S"))
-        r.zadd(f"count:{coin_name}", {'count': 0}, False, True)
+        r.hset(f"{coin_name}", 'highest', str(highest_price))
+        r.hset(f"{coin_name}", 'lowest', str(lowest_price))
+        r.hset(f"{coin_name}", 'curr_trade_date', datetime.now().strftime("%Y%m%d"))
+        r.hset(f"{coin_name}", 'curr_trade_time', datetime.now().strftime("%Y%m%d"))
+        r.hset(f"{coin_name}", 'prev_trade_date', r.hget(f"{coin_name}", 'curr_trade_date'))
+        r.hset(f"{coin_name}", 'prev_trade_time', r.hget(f"{coin_name}", 'curr_trade_time'))
+        r.hset(f"{coin_name}", 'count', '0')
 
-    r.zincrby(f"count:{coin_name}", 1, 'count')
+    r.hincrby(f"{coin_name}", "count", 1)
 
 
-def main():
+def discord_alarm(title: str, content: str):
+    list_data = r.lrange('discord_webhook_url', 0, -1)[0]
+    webhook = DiscordWebhook(url=list_data)
+    embed = DiscordEmbed(title=title, description=content, color="03b2f8")
+    webhook.add_embed(embed)
+    webhook.execute()
+    # webhook = DiscordWebhook(url=list_data, thread_name="test")
+    # embed = DiscordEmbed(title=title, description=content, color="03b2f8")
+    # webhook.add_embed(embed)
+    # webhook.execute()
+
+
+async def polling_executor_1():
     while True:
-        call_api()
-        time.sleep(60 * 1)
+        upbit_tracker()
+        coin_perform()
+        alarm()
+        await asyncio.sleep(60 * 1)
 
+
+async def polling_executor_5():
+    while True:
+        get_coin_lists()
+        await asyncio.sleep(60 * 5)
+
+
+async def main():
+    await polling_executor_1()
+    await polling_executor_5()
 
 if __name__ == "__main__":
-    main()
-
-
+    asyncio.run(main())
