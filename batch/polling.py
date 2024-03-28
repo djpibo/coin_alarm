@@ -2,13 +2,14 @@
 # 1. Alarm : 1% increase
 # 2. Alarm : Record High
 import asyncio
-import json
+
 # memo
 # [] is dict, {} is list
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import pymongo
 import redis
 import requests
 
@@ -18,8 +19,10 @@ from discord_webhook import DiscordWebhook, DiscordEmbed
 r = redis.Redis(host='localhost', port=6379, db=0)
 client = MongoClient(host='localhost', port=27017)
 db = client['test_database']
-collection = db['test_collection']
+c10_v = r.get("candles_result_version")
 ticker_result = db['ticker_result']
+candle_result_v1 = db['candle_result_v1']
+candle_result_v2 = db['candle_result_v2']
 api_failure = db['api_failure']
 rise_list = db['rise_list']
 down_list = db['down_list']
@@ -33,8 +36,37 @@ record_lowest_list = []
 url_markets = "https://api.upbit.com/v1/market/all?isDetails=true"
 url_ticker = "https://api.upbit.com/v1/ticker"
 url_data = "https://api.upbit.com/v1/market/all?isDetails=true"
-url_candle = "https://api.upbit.com/v1/candles/minutes/1?market=KRW-BTC&count=1"
 url_trade = "https://api.upbit.com/v1/trades/ticks?market=KRW-BTC&count=1&daysAgo=7"
+url_candles = "https://api.upbit.com/v1/candles/minutes/3?count=180"
+
+
+async def getAndSaveCurrCandle(candles_result, _market: str, _time: str):
+    _response = requests.get(
+        f"https://api.upbit.com/v1/candles/minutes/3?count=180&market={_market}&to={_time}"
+        , headers=headers)
+    _json = _response.json()
+    if _json:
+        if _response.status_code == 200:
+            # Perform bulk insert
+            bulk_operations = [pymongo.InsertOne(doc) for doc in _json]
+            candles_result.bulk_write(bulk_operations, ordered=False)
+        else:
+            print(f"ERROR {_json}")
+    else:
+        print(f"ERROR {_market}")
+
+
+def date_formatter(hour: int) -> str:
+    # Get the current time
+    current_time = datetime.now()
+    # Set minute and second to 0
+    current_time = current_time.replace(minute=0, second=0)
+    # Subtract 9 hours from the current time
+    nine_hours_ago = current_time - timedelta(hours=hour)
+    # Format the datetime using ISO 8601 format
+    formatted_time = nine_hours_ago.strftime("%Y-%m-%dT%H:%M:%S%z")
+    # Replace ":" with "%3A" and "+" with "%2B"
+    return formatted_time.replace(":", "%3A")
 
 
 def upbit_tracker():
@@ -50,30 +82,25 @@ def upbit_tracker():
 def alarm():
     if coin_up_list:
         print(f"상승폭 알람 : {coin_up_list}")
-        discord_alarm(f"상승폭 알람", f"대상 코인 : {coin_up_list}")
+        discord_alarm(f"상승폭 알람", f"{coin_up_list}")
         coin_up_list.clear()
 
     if coin_down_list:
         print(f"하락폭 알람 : {coin_down_list}")
-        discord_alarm(f"하락폭 알람", f"대상 코인 : {coin_down_list}")
+        discord_alarm(f"하락폭 알람", f"{coin_down_list}")
 
     if record_highest_list:
         print(f"최고치 알람 : {record_highest_list}")
-        discord_alarm(f"최고치 알람", f"대상 코인 : {record_highest_list}")
+        discord_alarm(f"최고치 알람", f"{record_highest_list}")
 
     if record_lowest_list:
         print(f"최저치 알람 : {record_lowest_list}")
-        discord_alarm(f"최저치 알람", f"대상 코인 : {record_lowest_list}")
+        discord_alarm(f"최저치 알람", f"{record_lowest_list}")
 
 
-def coin_perform():
-    total = 0
-    count = r.llen("KRW_coins")
-    for dynamic_market in [value.decode('utf-8') for value in r.lrange("KRW_coins", 0, -1)]:
-        _result = collection.find({"market": dynamic_market}).sort("timestamp", -1).limit(2)
+def gap_calculator(_result, dynamic_market):
+    if _result.__sizeof__() == 2:
         gap = abs(_result[0].get("change_rate") - _result[1].get("change_rate"))
-        save_record(dynamic_market, _result[0].get("trade_price"))
-        total = _result[0].get("change_rate") * 100
         if gap > 0.01:
             if _result[0].get("change") == "RISE":
                 save_gap_list(_result[0], gap, 1)
@@ -81,6 +108,17 @@ def coin_perform():
             else:
                 save_gap_list(_result[0], gap, 0)
                 coin_down_list.append(dynamic_market)
+
+
+def coin_perform():
+    total = 0
+    count = r.llen("KRW_coins")
+    for dynamic_market in [value.decode('utf-8') for value in r.lrange("KRW_coins", 0, -1)]:
+        _result = ticker_result.find({"market": dynamic_market}).sort("timestamp", -1).limit(2)
+        gap_calculator(_result, dynamic_market)
+        save_record(dynamic_market, _result[0].get("trade_price"))
+        total = _result[0].get("change_rate") * 100
+
     discord_alarm(f"평균 변화율 알람", f"대상 코인 건수 : {count}, 평균 변화율 : {format(total / count, ',.4f')}%")
 
 
@@ -128,6 +166,7 @@ def save_record(coin_name: str, trade_price: float):
         if trade_price < lowest_price:
             lowest_price = trade_price
             record_lowest_list.append(coin_name)
+
         r.hset(f"{coin_name}", 'highest', str(highest_price))
         r.hset(f"{coin_name}", 'lowest', str(lowest_price))
         r.hset(f"{coin_name}", 'curr_trade_date', datetime.now().strftime("%Y%m%d"))
@@ -141,14 +180,54 @@ def save_record(coin_name: str, trade_price: float):
 
 def discord_alarm(title: str, content: str):
     list_data = r.lrange('discord_webhook_url', 0, -1)[0]
-    webhook = DiscordWebhook(url=list_data)
+    if title == "평균 변화율 알람":
+        thread_id = "1222408506297290752"
+    elif title == "최고치 알람":
+        thread_id = "1222408784543219732"
+    elif title == "최저치 알람":
+        thread_id = "1221658379437740072"
+    elif title == "상승폭 알람":
+        thread_id = "1222408509023457360"
+    elif title == "하락폭 알람":
+        thread_id = "1222408511414206599"
+    elif title == "배치 작업 알람":
+        thread_id = ""
+    else:
+        thread_id = ""
+    webhook = DiscordWebhook(url=list_data, thread_id=thread_id)
     embed = DiscordEmbed(title=title, description=content, color="03b2f8")
     webhook.add_embed(embed)
     webhook.execute()
-    # webhook = DiscordWebhook(url=list_data, thread_name="test")
-    # embed = DiscordEmbed(title=title, description=content, color="03b2f8")
-    # webhook.add_embed(embed)
-    # webhook.execute()
+
+
+async def batch_candle():
+    discord_alarm("배치 작업 알람", "최근 18시간 데이터 적재 배치 시작")
+    if int(r.get("candles_result_version")) == 1:
+        candles_result = candle_result_v2
+    else:
+        candles_result = candle_result_v1
+
+    curr_time = date_formatter(0)
+    prev_time = date_formatter(9)
+    discord_alarm("배치 작업 상세", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
+                              f"적재 대상 collection : {candles_result}")
+
+    for value in r.lrange("KRW_coins", 0, -1):
+        job_curr = asyncio.create_task(getAndSaveCurrCandle(candles_result, value.decode('utf-8'), curr_time))
+        await job_curr
+        job_prev = asyncio.create_task(getAndSaveCurrCandle(candles_result, value.decode('utf-8'), prev_time))
+        await job_prev
+
+    if int(r.get("candles_result_version")) == 1:
+        db.drop_collection(candle_result_v1)
+        discord_alarm("배치 작업 상세", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
+                                  f"삭제 대상 collection : {candle_result_v1}")
+        await r.set("candles_result_version", 2)
+    else:
+        db.drop_collection(candle_result_v2)
+        discord_alarm("배치 작업 상세", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
+                                  f"삭제 대상 collection : {candle_result_v2}")
+        await r.set("candles_result_version", 1)
 
 
 async def polling_executor_1():
@@ -165,9 +244,26 @@ async def polling_executor_5():
         await asyncio.sleep(60 * 5)
 
 
+async def cron_executor():
+    while True:
+        current_time = datetime.now()
+        if current_time.minute == 55:
+            await batch_candle()
+            # Sleep for a while to avoid continuous checking
+            await asyncio.sleep(60 - current_time.second)  # Sleep until the next minute starts
+
+
 async def main():
-    await polling_executor_1()
-    await polling_executor_5()
+
+    job_1 = asyncio.create_task(polling_executor_1())
+    job_5 = asyncio.create_task(polling_executor_5())
+    cron_job = asyncio.create_task(cron_executor())
+
+    await job_1
+    await job_5
+    await cron_job
+
 
 if __name__ == "__main__":
     asyncio.run(main())
+
