@@ -5,9 +5,13 @@ import pymongo
 import pytz
 import redis
 import requests
+from discord_webhook import DiscordWebhook, DiscordEmbed
 
 from batch.polling import get_coin_lists, api_failure, url_candles, candle_result_v1
 from pymongo import MongoClient
+
+from connection.postgres import get_by_id, CodeAlarm
+from dao.postgres import get_data_by_id
 
 headers = {"accept": "application/json"}
 url_markets = "https://api.upbit.com/v1/market/all?isDetails=true"
@@ -73,7 +77,8 @@ def getAndSaveCurrCandle(candles_result, _market: str, _time: str):
 
 
 def test_any():
-    print(date_formatter(9))
+    # print(date_formatter(9))
+    test_discord_alarm("DCR001", "example")
 
 
 def date_formatter(hour: int) -> str:
@@ -87,3 +92,11 @@ def date_formatter(hour: int) -> str:
     formatted_time = nine_hours_ago.strftime("%Y-%m-%dT%H:%M:%S%z")
     # Replace ":" with "%3A" and "+" with "%2B"
     return formatted_time.replace(":", "%3A")
+
+
+def test_discord_alarm(_id: str, content: str):
+    data: CodeAlarm = get_by_id(_id)
+    webhook = DiscordWebhook(url=data.discord_webhook_url, thread_id=data.thread_id)
+    embed = DiscordEmbed(title=data.title, description=content, color="03b2f8")
+    webhook.add_embed(embed)
+    webhook.execute()

@@ -1,21 +1,22 @@
 # What should I do ?
 # 1. Alarm : 1% increase
 # 2. Alarm : Record High
-import asyncio
-
 # memo
 # [] is dict, {} is list
-
-import time
-from datetime import datetime, timedelta
 
 import pymongo
 import redis
 import requests
+import asyncio
 
+from datetime import datetime, timedelta
 from pymongo import MongoClient
 from discord_webhook import DiscordWebhook, DiscordEmbed
 
+from connection.postgres import CodeAlarm, get_by_id
+from dao.postgres import get_data_by_id
+
+# Connect to the postgresSQL database
 r = redis.Redis(host='localhost', port=6379, db=0)
 client = MongoClient(host='localhost', port=27017)
 db = client['test_database']
@@ -82,20 +83,20 @@ def upbit_tracker():
 def alarm():
     if coin_up_list:
         print(f"상승폭 알람 : {coin_up_list}")
-        discord_alarm(f"상승폭 알람", f"{coin_up_list}")
+        discord_alarm("DCR001", f"{coin_up_list}")
         coin_up_list.clear()
 
     if coin_down_list:
         print(f"하락폭 알람 : {coin_down_list}")
-        discord_alarm(f"하락폭 알람", f"{coin_down_list}")
+        discord_alarm("DCR002", f"{coin_down_list}")
 
     if record_highest_list:
         print(f"최고치 알람 : {record_highest_list}")
-        discord_alarm(f"최고치 알람", f"{record_highest_list}")
+        discord_alarm("DCR003", f"{record_highest_list}")
 
     if record_lowest_list:
         print(f"최저치 알람 : {record_lowest_list}")
-        discord_alarm(f"최저치 알람", f"{record_lowest_list}")
+        discord_alarm("DCR004", f"{record_lowest_list}")
 
 
 def gap_calculator(_result, dynamic_market):
@@ -119,7 +120,7 @@ def coin_perform():
         save_record(dynamic_market, _result[0].get("trade_price"))
         total = _result[0].get("change_rate") * 100
 
-    discord_alarm(f"평균 변화율 알람", f"대상 코인 건수 : {count}, 평균 변화율 : {format(total / count, ',.4f')}%")
+    discord_alarm("DCR006", f"대상 코인 건수 : {count}, 평균 변화율 : {format(total / count, ',.4f')}%")
 
 
 def get_coin_lists():
@@ -178,30 +179,16 @@ def save_record(coin_name: str, trade_price: float):
     r.hincrby(f"{coin_name}", "count", 1)
 
 
-def discord_alarm(title: str, content: str):
-    list_data = r.lrange('discord_webhook_url', 0, -1)[0]
-    if title == "평균 변화율 알람":
-        thread_id = "1222408506297290752"
-    elif title == "최고치 알람":
-        thread_id = "1222408784543219732"
-    elif title == "최저치 알람":
-        thread_id = "1221658379437740072"
-    elif title == "상승폭 알람":
-        thread_id = "1222408509023457360"
-    elif title == "하락폭 알람":
-        thread_id = "1222408511414206599"
-    elif title == "배치 작업 알람":
-        thread_id = ""
-    else:
-        thread_id = ""
-    webhook = DiscordWebhook(url=list_data, thread_id=thread_id)
-    embed = DiscordEmbed(title=title, description=content, color="03b2f8")
+def discord_alarm(_id: str, content: str):
+    data: CodeAlarm = get_by_id(_id)
+    webhook = DiscordWebhook(url=data.discord_webhook_url, thread_id=data.thread_id)
+    embed = DiscordEmbed(title=data.title, description=content, color="03b2f8")
     webhook.add_embed(embed)
     webhook.execute()
 
 
 async def batch_candle():
-    discord_alarm("배치 작업 알람", "최근 18시간 데이터 적재 배치 시작")
+    discord_alarm("DCR005", "최근 18시간 데이터 적재 배치 시작")
     if int(r.get("candles_result_version")) == 1:
         candles_result = candle_result_v2
     else:
@@ -209,8 +196,8 @@ async def batch_candle():
 
     curr_time = date_formatter(0)
     prev_time = date_formatter(9)
-    discord_alarm("배치 작업 상세", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
-                              f"적재 대상 collection : {candles_result}")
+    discord_alarm("DCR005", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
+                            f"적재 대상 collection : {candles_result}")
 
     for value in r.lrange("KRW_coins", 0, -1):
         job_curr = asyncio.create_task(getAndSaveCurrCandle(candles_result, value.decode('utf-8'), curr_time))
@@ -220,13 +207,13 @@ async def batch_candle():
 
     if int(r.get("candles_result_version")) == 1:
         db.drop_collection(candle_result_v1)
-        discord_alarm("배치 작업 상세", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
-                                  f"삭제 대상 collection : {candle_result_v1}")
+        discord_alarm("DCR005", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
+                                f"삭제 대상 collection : {candle_result_v1}")
         await r.set("candles_result_version", 2)
     else:
         db.drop_collection(candle_result_v2)
-        discord_alarm("배치 작업 상세", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
-                                  f"삭제 대상 collection : {candle_result_v2}")
+        discord_alarm("DCR005", f"배치 작업 대상 collection version {r.get("candles_result_version")} "
+                                f"삭제 대상 collection : {candle_result_v2}")
         await r.set("candles_result_version", 1)
 
 
@@ -254,7 +241,6 @@ async def cron_executor():
 
 
 async def main():
-
     job_1 = asyncio.create_task(polling_executor_1())
     job_5 = asyncio.create_task(polling_executor_5())
     cron_job = asyncio.create_task(cron_executor())
@@ -266,4 +252,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
